@@ -363,21 +363,23 @@ void MP2Node::checkMessages() {
 
         string delimiter = "::";
         size_t delim_loc = 0;
-        vector<string> message_by_parts;
+        Message incoming_msg(message);
 
-        while ((delim_loc = message.find(delimiter)) != string::npos) {
-            message_by_parts.emplace_back(message.substr(0, delim_loc));
-            message.erase(0, delim_loc + delimiter.length());
-        }
-        message_by_parts.push_back(message);
-        MessageType mtype = static_cast<MessageType>(atoi(message_by_parts[2].c_str()));
+//        vector<string> message_by_parts;
+//
+//        while ((delim_loc = message.find(delimiter)) != string::npos) {
+//            message_by_parts.emplace_back(message.substr(0, delim_loc));
+//            message.erase(0, delim_loc + delimiter.length());
+//        }
+//        message_by_parts.push_back(message);
+//        MessageType mtype = static_cast<MessageType>(atoi(message_by_parts[2].c_str()));
 
-        switch(mtype){
-            case CREATE     : {processCreate(message_by_parts); break;}
-            case READ       : {processRead(message_by_parts); break;}
-            case REPLY      : {processNodesReply(message_by_parts); break;}
-            case READREPLY  : {processReadReply(message_by_parts);break;}
-            case DELETE     : {processDelete(message_by_parts); break;}
+        switch(incoming_msg.type) {
+            case CREATE     : {processCreate(incoming_msg); break;}
+            case READ       : {processRead(incoming_msg); break;}
+            case REPLY      : {processNodesReply(incoming_msg); break;}
+            case READREPLY  : {processReadReply(incoming_msg);break;}
+            case DELETE     : {processDelete(incoming_msg); break;}
             default         : {}
         }
 	}
@@ -390,34 +392,85 @@ void MP2Node::checkMessages() {
 	 */
 }
 
+
+void MP2Node::logCoordinatorSuccess(map<int, transaction_details>::iterator it) {
+    switch(this->transaction_count[it->first].rep_type){
+        case CREATE : {log->logCreateSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
+        case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+        case READ   : {
+            if (it->second.value.compare("") != 0)
+                log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value);
+            else
+                log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key + "coord");
+            break;
+        }
+        default: {}
+    }
+    cout << "Success transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
+    this->transaction_count.erase(it->first);
+}
+
+void MP2Node::logCoordinatorFailure(map<int, transaction_details>::iterator it) {
+    switch(this->transaction_count[it->first].rep_type){
+        case CREATE : {log->logCreateFail(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
+        case DELETE : {log->logDeleteFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+        case READ   : {log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+        default: {}
+    }
+    cout << "Failed transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
+    this->transaction_count.erase(it->first);
+}
+
 void MP2Node::checkReplyMessages() {
     int curr_time = par->getcurrtime();
     map<int, transaction_details>::iterator it = this->transaction_count.begin();
     cout << "For server = ";
     printAddress(&getMemberNode()->addr);
     cout << endl;
+    pair<int, int> rep_count;
+    int acks = 0, nacks = 0;
+
     while(it != this->transaction_count.end()) {
-        if (it->second.reply_count < 2) {
-            if ((curr_time - it->second.timestamp) >= Reply_Timeout) {
-                switch(this->transaction_count[it->first].rep_type){
-                    case CREATE : {log->logCreateFail(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
-                    case READ   : {log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-                    case DELETE : {log->logDeleteFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-                    default: {}
+        rep_count = this->countAcks(it->first);
+        acks = rep_count.first; nacks = rep_count.second;
+        if ( (acks + nacks) <= 2){
+            if (acks == 2){
+                this->logCoordinatorSuccess(it);
+            } else {
+                if ((curr_time - it->second.timestamp) >= Reply_Timeout) {
+                    this->logCoordinatorFailure(it);
                 }
-                cout << "Failed transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
-                this->transaction_count.erase(it->first);
             }
         } else {
-            switch(this->transaction_count[it->first].rep_type){
-                case CREATE : {log->logCreateSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
-                case READ   : {log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value + "coord("); break;}
-                case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-                default: {}
+            if (acks < nacks){
+                if ((curr_time - it->second.timestamp) >= Reply_Timeout) {
+                    this->logCoordinatorFailure(it);
+                }
+            } else {
+                    this->logCoordinatorSuccess(it);
             }
-            cout << "Success transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
-            this->transaction_count.erase(it->first);
         }
+//        if (it->second.reply_count < 2) {
+//            if ((curr_time - it->second.timestamp) >= Reply_Timeout) {
+//                switch(this->transaction_count[it->first].rep_type){
+//                    case CREATE : {log->logCreateFail(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
+//                    case READ   : {log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+//                    case DELETE : {log->logDeleteFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+//                    default: {}
+//                }
+//                cout << "Failed transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
+//                this->transaction_count.erase(it->first);
+//            }
+//        } else {
+//            switch(this->transaction_count[it->first].rep_type){
+//                case CREATE : {log->logCreateSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
+//                case READ   : {log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value + "coord("); break;}
+//                case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, it->first, it->second.key); break;}
+//                default: {}
+//            }
+//            cout << "Success transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
+//            this->transaction_count.erase(it->first);
+//        }
         it++;
     }
 }
@@ -491,76 +544,77 @@ void MP2Node::stabilizationProtocol() {
 	 */
 }
 
-void MP2Node::processCreate(vector<string> message_by_parts) {
-    bool success_status = createKeyValue(message_by_parts[3], message_by_parts[4], static_cast<ReplicaType>(atoi(message_by_parts[5].c_str())));
-    int _trans_id = atoi(message_by_parts[0].c_str());
+void MP2Node::processCreate(Message incoming_msg) {
+    bool success_status = createKeyValue(incoming_msg.key, incoming_msg.value, incoming_msg.replica);
+    int _trans_id = incoming_msg.transID;
     Message *msg;
-    msg = new Message(atoi(message_by_parts[0].c_str()), getMemberNode()->addr, REPLY, success_status);
+    msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
     msg->delimiter = "::";
-    Address to_addr(message_by_parts[1]);
+    Address to_addr(incoming_msg.fromAddr);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString());
     if (success_status)
-        log->logCreateSuccess(&getMemberNode()->addr, false, _trans_id, message_by_parts[3], message_by_parts[4]);
+        log->logCreateSuccess(&getMemberNode()->addr, false, _trans_id, incoming_msg.key, incoming_msg.value);
     else
-        log->logCreateFail(&getMemberNode()->addr, false, _trans_id, message_by_parts[3], message_by_parts[4]);
+        log->logCreateFail(&getMemberNode()->addr, false, _trans_id, incoming_msg.key, incoming_msg.value);
 }
 
 
-void MP2Node::processRead(vector<string> message_by_parts) {
-    string value = readKey(message_by_parts[3]);
-    int _trans_id = atoi(message_by_parts[0].c_str());
+void MP2Node::processRead(Message incoming_msg) {
+    string read_value = readKey(incoming_msg.key);
+    cout << "Read from local " << read_value << " for key = " << incoming_msg.key << endl;
+    int _trans_id = incoming_msg.transID;
     Message *msg;
-    msg = new Message(atoi(message_by_parts[0].c_str()), getMemberNode()->addr, READREPLY, value);
+    msg = new Message(_trans_id, getMemberNode()->addr, read_value);
     msg->delimiter = "::";
-    Address to_addr(message_by_parts[1]);
+    Address to_addr(incoming_msg.fromAddr);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString());
-    if (value.compare("") != 0)
-        log->logReadSuccess(&getMemberNode()->addr, false, _trans_id, message_by_parts[3], value);
+    if (read_value.compare("") != 0)
+        log->logReadSuccess(&getMemberNode()->addr, false, _trans_id, incoming_msg.key, read_value);
     else
-        log->logReadFail(&getMemberNode()->addr, false, _trans_id, message_by_parts[3]);
+        log->logReadFail(&getMemberNode()->addr, false, _trans_id, incoming_msg.key);
 }
 
-void MP2Node::processDelete(vector<string> message_by_parts) {
-    bool success_status = deletekey(message_by_parts[3]);
-    int _trans_id = atoi(message_by_parts[0].c_str());
+void MP2Node::processDelete(Message incoming_msg) {
+    bool success_status = deletekey(incoming_msg.key);
+    int _trans_id = incoming_msg.transID;
     cout << "I am in del " << endl;
 
     Message *msg;
-    msg = new Message(atoi(message_by_parts[0].c_str()), getMemberNode()->addr, REPLY, success_status);
+    msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
     msg->delimiter = "::";
-    Address to_addr(message_by_parts[1]);
+    Address to_addr(incoming_msg.fromAddr);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString() + msg->delimiter);
 
     if (success_status)
-        log->logDeleteSuccess(&getMemberNode()->addr, false, _trans_id, message_by_parts[3]);
+        log->logDeleteSuccess(&getMemberNode()->addr, false, _trans_id, incoming_msg.key);
     else{
-        log->logDeleteFail(&getMemberNode()->addr, false, _trans_id, message_by_parts[3]);
+        log->logDeleteFail(&getMemberNode()->addr, false, _trans_id, incoming_msg.key);
     }
 }
 
-void MP2Node::processReadReply(vector<string> message_by_parts){
-    int _trans_id = atoi(message_by_parts[0].c_str());
-    string value = message_by_parts[3];
-
+void MP2Node::processReadReply(Message incoming_msg){
+    int _trans_id = incoming_msg.transID;
+    string value = incoming_msg.value;
+    cout << "Value read from the DHT" << value << endl;
     if (value.compare("") != 0){
         Entry entry_value(value);
         this->transaction_count[_trans_id].value = entry_value.value;
         incTransactionReplyCount(_trans_id, 1, value);
     }
     else
-        incTransactionReplyCount(_trans_id, -1, ""); //this->transaction_count[_trans_id].reply_count = -1 * (RF + 1);//incTransactionReplyCount(_trans_id, -1, "");
+        incTransactionReplyCount(_trans_id, 1, "");
 }
 
-void MP2Node::processNodesReply(vector<string> message_by_parts) {
-    Address from_addr(message_by_parts[1]);
-    int _trans_id = atoi(message_by_parts[0].c_str());
-    int success = atoi(message_by_parts[3].c_str());
+void MP2Node::processNodesReply(Message incoming_msg) {
+    Address from_addr(incoming_msg.fromAddr);
+    int _trans_id = incoming_msg.transID;
+    bool success = incoming_msg.success;
 
     cout << "I got a reply from ";
     printAddress(&from_addr);
     cout << endl;
 
-    if (success == 1)
+    if (success)
         incTransactionReplyCount(_trans_id, 1, "");
     else
         incTransactionReplyCount(_trans_id, -1, "");//transaction_count[_trans_id].reply_count = -1 * (RF + 1);
@@ -622,6 +676,26 @@ void MP2Node::assignReplicationNodes() {
 
 }
 
+pair<int, int> MP2Node::countAcks(int _trans_id){
+    map<int,transaction_details>::iterator it = this->transaction_count.find(_trans_id);
+    int acks = 0, nacks = 0, reply_val;
+    if (it != this->transaction_count.end()){
+        vector<pair<int, string>>::iterator it2 = this->transaction_count[_trans_id].ackStore.begin();
+        while(it2 != this->transaction_count[_trans_id].ackStore.end()){
+            reply_val = it2->first;
+            if (reply_val == 1)
+                acks++;
+            else
+                nacks++;
+            it2++;
+        }
+        cout << "Acks = "<<acks << " Nacks = " << nacks << endl;
+        return pair<int, int>(acks, nacks);
+    }
+    else
+        return pair<int, int>(0, 0);
+}
+
 void MP2Node::initTransactionCount(int _trans_id, string key, string value, MessageType msg_type){
     map<int,transaction_details>::iterator it = this->transaction_count.find(_trans_id);
 
@@ -643,7 +717,7 @@ void MP2Node::incTransactionReplyCount(int _trans_id, int ack_type, string incom
     if (it == this->transaction_count.end())
         return;
     else{
-        this->transaction_count[_trans_id].ackStore.emplace_back(pair<int, string>(ack_type, incoming_message));
+        this->transaction_count[_trans_id].ackStore.push_back(pair<int, string>(ack_type, incoming_message));
         this->transaction_count[_trans_id].reply_count++;
     }
 }

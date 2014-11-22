@@ -118,17 +118,20 @@ public:
     //
     void initTransactionCount(int _trans_id, string key, string value, MessageType msg_type);
     void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message);
-
+    pair<int, int> countAcks(int _trans_id);
     // find prev and next neighbors in ring
     vector<Node> findMyBosses(string key);
     vector<Node> findMyReplicas(string key);
 
     //
-    void processCreate(vector<string> message_by_parts);
-    void processRead(vector<string> message_by_parts);
-    void processNodesReply(vector<string> message_by_parts);
-    void processDelete(vector<string> message_by_parts);
-    void processReadReply(vector<string> message_by_parts);
+    void processCreate(Message incoming_msg);
+    void processRead(Message incoming_msg);
+    void processNodesReply(Message incoming_msg);
+    void processDelete(Message incoming_msg);
+    void processReadReply(Message incoming_msg);
+
+    void logCoordinatorSuccess(map<int, transaction_details>::iterator it);
+    void logCoordinatorFailure(map<int, transaction_details>::iterator it);
 
     ~MP2Node();
 };
