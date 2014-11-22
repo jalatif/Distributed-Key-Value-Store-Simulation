@@ -126,9 +126,10 @@ public:
     //
     void processCreate(Message incoming_msg);
     void processRead(Message incoming_msg);
-    void processNodesReply(Message incoming_msg);
     void processDelete(Message incoming_msg);
+    void processUpdate(Message incoming_msg);
     void processReadReply(Message incoming_msg);
+    void processNodesReply(Message incoming_msg);
 
     void logCoordinatorSuccess(map<int, transaction_details>::iterator it);
     void logCoordinatorFailure(map<int, transaction_details>::iterator it);
