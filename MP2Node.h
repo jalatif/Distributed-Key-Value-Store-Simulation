@@ -39,6 +39,7 @@ typedef struct {
     int timestamp;
     string key;
     string value;
+    vector<pair<int, string>> ackStore;
 } transaction_details;
 
 class MP2Node {
@@ -116,8 +117,7 @@ public:
 
     //
     void initTransactionCount(int _trans_id, string key, string value, MessageType msg_type);
-    void incTransactionReplyCount(int _trans_id);
-    transaction_details getTransactionReplyCount(int _trans_id);
+    void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message)
 
     // find prev and next neighbors in ring
     vector<Node> findMyBosses(string key);
@@ -125,8 +125,11 @@ public:
 
     //
     void processCreate(vector<string> message_by_parts);
+    void processRead(vector<string> message_by_parts);
     void processNodesReply(vector<string> message_by_parts);
     void processDelete(vector<string> message_by_parts);
+    void processReadReply(vector<string> message_by_parts);
+
     ~MP2Node();
 };
 
