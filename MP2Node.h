@@ -117,7 +117,7 @@ public:
 
     //
     void initTransactionCount(int _trans_id, string key, string value, MessageType msg_type);
-    void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message)
+    void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message);
 
     // find prev and next neighbors in ring
     vector<Node> findMyBosses(string key);

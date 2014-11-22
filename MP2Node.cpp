@@ -171,7 +171,7 @@ void MP2Node::clientRead(string key){
 
     Message *msg;
     for (int i = 0; i < RF; i++){
-        msg = new Message(this->transaction_id, getMemberNode()->addr, DELETE, key);
+        msg = new Message(this->transaction_id, getMemberNode()->addr, READ, key);
         msg->delimiter = "::";
         emulNet->ENsend(&getMemberNode()->addr, destination_nodes[i].getAddress(), msg->toString());
     }
@@ -360,6 +360,7 @@ void MP2Node::checkMessages() {
 
         cout << "Got message = " <<  message << endl;
 
+
         string delimiter = "::";
         size_t delim_loc = 0;
         vector<string> message_by_parts;
@@ -410,12 +411,7 @@ void MP2Node::checkReplyMessages() {
         } else {
             switch(this->transaction_count[it->first].rep_type){
                 case CREATE : {log->logCreateSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
-                case READ   : {
-                    if (it->second.value.compare("") != 0)
-                        log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value);
-                    else
-                        log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key);
-                        break;}
+                case READ   : {log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value + "coord("); break;}
                 case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, it->first, it->second.key); break;}
                 default: {}
             }
@@ -541,13 +537,18 @@ void MP2Node::processDelete(vector<string> message_by_parts) {
         log->logDeleteFail(&getMemberNode()->addr, false, _trans_id, message_by_parts[3]);
     }
 }
+
 void MP2Node::processReadReply(vector<string> message_by_parts){
     int _trans_id = atoi(message_by_parts[0].c_str());
     string value = message_by_parts[3];
 
-    incTransactionReplyCount(_trans_id);
-    this->transaction_count[_trans_id].value = value;
-
+    if (value.compare("") != 0){
+        Entry entry_value(value);
+        this->transaction_count[_trans_id].value = entry_value.value;
+        incTransactionReplyCount(_trans_id, 1, value);
+    }
+    else
+        incTransactionReplyCount(_trans_id, -1, ""); //this->transaction_count[_trans_id].reply_count = -1 * (RF + 1);//incTransactionReplyCount(_trans_id, -1, "");
 }
 
 void MP2Node::processNodesReply(vector<string> message_by_parts) {
@@ -559,28 +560,10 @@ void MP2Node::processNodesReply(vector<string> message_by_parts) {
     printAddress(&from_addr);
     cout << endl;
 
-    map<int, transaction_details>::iterator it = transaction_count.find(_trans_id);
-    if (success == 1){
-        incTransactionReplyCount(_trans_id, 1, "");}
+    if (success == 1)
+        incTransactionReplyCount(_trans_id, 1, "");
     else
-        transaction_count[_trans_id].reply_count = -1 * (RF + 1);
-//        if (it != transaction_count.end())
-//            switch(transaction_count[_trans_id].rep_type){
-//                case CREATE : {incTransactionReplyCount(_trans_id); break;}
-//                case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, _trans_id, transaction_count[_trans_id].key);transaction_count.erase(_trans_id); break;}
-//            }
-//
-//    }
-//
-//
-//    if (success == 0){
-//        if (it != transaction_count.end()){
-//        switch(transaction_count[_trans_id].rep_type){
-//            case DELETE : {log->logDeleteFail(&getMemberNode()->addr, true, _trans_id, transaction_count[_trans_id].key);transaction_count.erase(_trans_id); break;}
-//        }
-//        cout << "Deleting invalid Key" << endl;
-//        }
-//    }
+        incTransactionReplyCount(_trans_id, -1, "");//transaction_count[_trans_id].reply_count = -1 * (RF + 1);
 }
 
 bool MP2Node::isRingSame(vector<Node> sortedMemList) {
@@ -660,7 +643,7 @@ void MP2Node::incTransactionReplyCount(int _trans_id, int ack_type, string incom
     if (it == this->transaction_count.end())
         return;
     else{
-        this->transaction_count[_trans_id].ackStore.emplace_back(pair(ack_type, incoming_message));
+        this->transaction_count[_trans_id].ackStore.emplace_back(pair<int, string>(ack_type, incoming_message));
         this->transaction_count[_trans_id].reply_count++;
     }
 }
