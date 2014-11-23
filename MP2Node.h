@@ -119,9 +119,13 @@ public:
     void initTransactionCount(int _trans_id, string key, string value, MessageType msg_type);
     void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message);
     pair<int, int> countAcks(int _trans_id);
-    // find prev and next neighbors in ring
-    vector<Node> findMyBosses(string key);
-    vector<Node> findMyReplicas(string key);
+
+    //check if nodes are similar
+    bool isNodeSame(Node n1, Node n2);
+    int ifExistNode(vector<Node> v, Node n1);
+
+    vector<pair<string, string>> findMyKeys(ReplicaType rep_type);
+
 
     //
     void processCreate(Message incoming_msg);

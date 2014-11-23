@@ -68,6 +68,9 @@ void MP2Node::updateRing() {
 
     cout << "Stablization required = " << stablization_required << endl;
 
+    if (stablization_required)
+        stabilizationProtocol();
+
     /*
      * Step 3: Run the stabilization protocol IF REQUIRED
      */
@@ -171,7 +174,6 @@ void MP2Node::clientRead(string key){
     Message *msg;
     for (int i = 0; i < RF; i++){
         msg = new Message(this->transaction_id, getMemberNode()->addr, READ, key);
-        msg->delimiter = "::";
         emulNet->ENsend(&getMemberNode()->addr, destination_nodes[i].getAddress(), msg->toString());
     }
     initTransactionCount(this->transaction_id++, key, "", READ);
@@ -200,7 +202,6 @@ void MP2Node::clientUpdate(string key, string value){
     Message *msg;
     for (int i = 0; i < RF; i++){
         msg = new Message(this->transaction_id, getMemberNode()->addr, UPDATE, key, value);
-        msg->delimiter = "::";
         emulNet->ENsend(&getMemberNode()->addr, destination_nodes[i].getAddress(), msg->toString());
     }
     initTransactionCount(this->transaction_id++, key, value, UPDATE);
@@ -227,7 +228,6 @@ void MP2Node::clientDelete(string key){
     Message *msg;
     for (int i = 0; i < RF; i++){
         msg = new Message(this->transaction_id, getMemberNode()->addr, DELETE, key);
-        msg->delimiter = "::";
         emulNet->ENsend(&getMemberNode()->addr, destination_nodes[i].getAddress(), msg->toString());
     }
     initTransactionCount(this->transaction_id++, key, "", DELETE);
@@ -251,30 +251,6 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
     cout << "Mereko na key aayi " << key << " aur value hai " << value << " aur replica bhi aaya = " << replica << endl;
     Entry e(value, par->getcurrtime(), replica);
     return ht->create(key, e.convertToString());
-//    if (replica == PRIMARY && hasMyReplicas.empty()){
-//        hasMyReplicas = findMyReplicas(key);
-////        for (int i = 1; i < RF; i++){
-////            hasMyReplicas.push_back(who_have_this_key[i]);
-////        }
-//
-//    } else if (replica != PRIMARY && haveReplicasOf.empty()) {
-//        vector<Node> myParentBoss = findMyBosses(key);
-//        vector<Node> ourFamily = findNodes(key);
-//        if (replica == SECONDARY){
-//            haveReplicasOf.push_back(ourFamily[0]);
-//            haveReplicasOf.push_back(myParentBoss[0]);
-//        }
-//        if (replica == TERTIARY){
-//            haveReplicasOf.push_back(ourFamily[1]);
-//            haveReplicasOf.push_back(ourFamily[0]);
-//        }
-////        vector<Node> who_have_this_key = findNodes(key);
-////
-////        if (std::find(haveReplicasOf.begin(), haveReplicasOf.end(), who_have_this_key[0]) == haveReplicasOf.end()){
-////            haveReplicasOf.push_back(who_have_this_key[0]);
-////            sort(haveReplicasOf.begin(), haveReplicasOf.end());
-////        }
-//    }
 }
 
 /**
@@ -433,6 +409,10 @@ void MP2Node::checkReplyMessages() {
     int acks = 0, nacks = 0;
 
     while(it != this->transaction_count.end()) {
+//        if (it->first < 0){
+//            it++;
+//            continue;
+//        }
         rep_count = this->countAcks(it->first);
         acks = rep_count.first; nacks = rep_count.second;
         if ( (acks + nacks) <= 2){
@@ -452,27 +432,6 @@ void MP2Node::checkReplyMessages() {
                     this->logCoordinatorSuccess(it);
             }
         }
-//        if (it->second.reply_count < 2) {
-//            if ((curr_time - it->second.timestamp) >= Reply_Timeout) {
-//                switch(this->transaction_count[it->first].rep_type){
-//                    case CREATE : {log->logCreateFail(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
-//                    case READ   : {log->logReadFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-//                    case DELETE : {log->logDeleteFail(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-//                    default: {}
-//                }
-//                cout << "Failed transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
-//                this->transaction_count.erase(it->first);
-//            }
-//        } else {
-//            switch(this->transaction_count[it->first].rep_type){
-//                case CREATE : {log->logCreateSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value); break;}
-//                case READ   : {log->logReadSuccess(&getMemberNode()->addr, true, it->first, it->second.key, it->second.value + "coord("); break;}
-//                case DELETE : {log->logDeleteSuccess(&getMemberNode()->addr, true, it->first, it->second.key); break;}
-//                default: {}
-//            }
-//            cout << "Success transaction  for transaction_id = " << it->first << ". Count is " << it->second.reply_count << " for key = " << it->second.key << " and value = " << it->second.value << endl;
-//            this->transaction_count.erase(it->first);
-//        }
         it++;
     }
 }
@@ -544,15 +503,177 @@ void MP2Node::stabilizationProtocol() {
 	/*
 	 * Implement this
 	 */
+    cout << "In stablization " << endl;
+
+    vector<Node> new_replicas, new_bosses;
+    Node this_node = Node(getMemberNode()->addr);
+
+    for (int i = 0; i < ring.size(); i++) {
+
+        if (isNodeSame(ring[i], this_node)) {
+            if (i == 0) {
+                new_bosses.push_back(Node(*ring[ring.size() - 1].getAddress()));
+                new_bosses.push_back(Node(*ring[ring.size() - 2].getAddress()));
+            }else if (i == 1){
+                new_bosses.push_back(Node(*ring[0].getAddress()));
+                new_bosses.push_back(Node(*ring[ring.size() - 1].getAddress()));
+            } else {
+                new_bosses.push_back(Node(*ring[(i - 1) % ring.size()].getAddress()));
+                new_bosses.push_back(Node(*ring[(i - 2) % ring.size()].getAddress()));
+            }
+            new_replicas.push_back(Node(*ring[(i + 1) % ring.size()].getAddress()));
+            new_replicas.push_back(Node(*ring[(i + 2) % ring.size()].getAddress()));
+        }
+    }
+
+    cout << "Ring is as follows : " << endl;
+    for (int i = 0; i < ring.size(); i++){
+        printAddress(ring[i].getAddress());
+        cout << " ";
+    }
+    cout << endl;
+    cout << "Old->New Replicas of ";
+    printAddress(&getMemberNode()->addr);
+    cout << " are at " << endl;
+    for (int i = 0; i < hasMyReplicas.size(); i++){
+        printAddress(hasMyReplicas[i].getAddress());
+        cout << "->";
+        printAddress(new_replicas[i].getAddress());
+        cout << endl;
+    }
+    cout << "Old->New has replicas of " << endl;
+    for (int i = 0; i < haveReplicasOf.size(); i++){
+        printAddress(haveReplicasOf[i].getAddress());
+        cout << "->";
+        printAddress(new_bosses[i].getAddress());
+        cout << endl;
+    }
+
+    // CHeck new replicas first
+    for (int i = 0; i < new_replicas.size(); i++) {
+        if (isNodeSame(hasMyReplicas[i], new_replicas[i])) {
+            continue;
+        }
+        else {
+            if (ifExistNode(hasMyReplicas, new_replicas[i]) != -1) {
+                vector<pair<string, string>> keys = findMyKeys(PRIMARY);
+                Message *msg;
+                for (int k = 0; k < keys.size(); k++) {
+                    msg = new Message(-1, getMemberNode()->addr, UPDATE, keys[k].first, keys[k].second, static_cast<ReplicaType>(i + 1));
+                    emulNet->ENsend(&getMemberNode()->addr, new_replicas[i].getAddress(), msg->toString());
+                    //initTransactionCount(-1, keys[k].first, keys[k].second, UPDATE);
+                }
+                free(msg);
+            } else {
+                vector<pair<string, string>> keys = findMyKeys(PRIMARY);
+                Message *msg;
+                for (int k = 0; k < keys.size(); k++) {
+                    msg = new Message(-1, getMemberNode()->addr, CREATE, keys[k].first, keys[k].second, static_cast<ReplicaType>(i + 1));
+                    emulNet->ENsend(&getMemberNode()->addr, new_replicas[i].getAddress(), msg->toString());
+                    //initTransactionCount(-1, keys[k].first, keys[k].second, CREATE);
+                }
+                free(msg);
+
+            }
+        }
+    }
+
+    // check for my bosses if they failed
+
+    for (int i = 0; i < haveReplicasOf.size(); i++) {
+        if (isNodeSame(haveReplicasOf[i], new_bosses[i])) {
+            break;
+        }
+        else {
+            if (ifExistNode(new_bosses, haveReplicasOf[i]) != -1) {
+                break;
+            } else {
+                vector<pair<string, string>> keys = findMyKeys(static_cast<ReplicaType>(i + 1));
+                Entry *e;
+                for (int k = 0; k < keys.size(); k++){
+                    e = new Entry(keys[k].second, par->getcurrtime(), PRIMARY);
+                    ht->update(keys[k].first, e->convertToString());
+                    free(e);
+                }
+                if (i == 0){
+                    Message *msg;
+                    for (int k = 0; k < keys.size(); k++) {
+                        if (isNodeSame(new_replicas[0], hasMyReplicas[0])){
+                            msg = new Message(-1, getMemberNode()->addr, UPDATE, keys[k].first, keys[k].second, SECONDARY);
+                            emulNet->ENsend(&getMemberNode()->addr, new_replicas[0].getAddress(), msg->toString());
+                        } else {
+                            msg = new Message(-1, getMemberNode()->addr, CREATE, keys[k].first, keys[k].second, SECONDARY);
+                            emulNet->ENsend(&getMemberNode()->addr, new_replicas[0].getAddress(), msg->toString());
+                        }
+                        msg = new Message(-1, getMemberNode()->addr, CREATE, keys[k].first, keys[k].second, TERTIARY);
+                        emulNet->ENsend(&getMemberNode()->addr, new_replicas[1].getAddress(), msg->toString());
+                        free(msg);
+                    }
+                } else if (i == 1){
+                    Message *msg;
+                    for (int k = 0; k < keys.size(); k++) {
+                        msg = new Message(-1, getMemberNode()->addr, CREATE, keys[k].first, keys[k].second, SECONDARY);
+                        emulNet->ENsend(&getMemberNode()->addr, new_replicas[0].getAddress(), msg->toString());
+
+                        msg = new Message(-1, getMemberNode()->addr, CREATE, keys[k].first, keys[k].second, TERTIARY);
+                        emulNet->ENsend(&getMemberNode()->addr, new_replicas[1].getAddress(), msg->toString());
+                        free(msg);
+                    }
+                }
+            }
+        }
+    }
+
+    // Now update the new replicas and bosses
+    hasMyReplicas  = new_replicas;
+    haveReplicasOf = new_bosses;
+
+}
+
+vector<pair<string, string>> MP2Node::findMyKeys(ReplicaType rep_type) {
+    map<string, string>::iterator iterator1 = ht->hashTable.begin();
+    vector<pair<string, string>> keys;
+    Entry *temp_e;
+    while (iterator1 != ht->hashTable.end()){
+        temp_e = new Entry(iterator1->second);
+        if (temp_e->replica == rep_type){
+            keys.push_back(pair<string, string>(iterator1->first, temp_e->value));
+        }
+        iterator1++;
+        free(temp_e);
+    }
+    return keys;
+}
+
+bool MP2Node::isNodeSame(Node n1, Node n2){
+    if (memcmp(n1.getAddress()->addr, n2.getAddress()->addr, sizeof(Address)) == 0)
+        return true;
+    return false;
+}
+
+int MP2Node::ifExistNode(vector<Node> v, Node n1){
+    vector<Node>::iterator iterator1 = v.begin();
+    int i = 0;
+    while(iterator1 != v.end()){
+        if (isNodeSame(n1, *iterator1))
+            return i;
+        iterator1++;
+        i++;
+    }
+    return -1;
 }
 
 void MP2Node::processCreate(Message incoming_msg) {
     bool success_status = createKeyValue(incoming_msg.key, incoming_msg.value, incoming_msg.replica);
     int _trans_id = incoming_msg.transID;
-    Message *msg;
-    msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
-    msg->delimiter = "::";
     Address to_addr(incoming_msg.fromAddr);
+
+    if (_trans_id < 0){
+        cout << "Oh somebody failed and I am replica of someone else who is ";
+        printAddress(&to_addr);
+        return;
+    }
+    Message *msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString());
     if (success_status)
         log->logCreateSuccess(&getMemberNode()->addr, false, _trans_id, incoming_msg.key, incoming_msg.value);
@@ -565,10 +686,12 @@ void MP2Node::processRead(Message incoming_msg) {
     string read_value = readKey(incoming_msg.key);
     cout << "Read from local " << read_value << " for key = " << incoming_msg.key << endl;
     int _trans_id = incoming_msg.transID;
-    Message *msg;
-    msg = new Message(_trans_id, getMemberNode()->addr, read_value);
-    msg->delimiter = "::";
     Address to_addr(incoming_msg.fromAddr);
+
+    if (_trans_id < 0)
+        return;
+
+    Message *msg = new Message(_trans_id, getMemberNode()->addr, read_value);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString());
     if (!read_value.empty())
         log->logReadSuccess(&getMemberNode()->addr, false, _trans_id, incoming_msg.key, read_value);
@@ -579,12 +702,14 @@ void MP2Node::processRead(Message incoming_msg) {
 void MP2Node::processUpdate(Message incoming_msg) {
     bool success_status = updateKeyValue(incoming_msg.key, incoming_msg.value, incoming_msg.replica);
     int _trans_id = incoming_msg.transID;
-    cout << "I am in update " << endl;
-
-    Message *msg;
-    msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
-    msg->delimiter = "::";
     Address to_addr(incoming_msg.fromAddr);
+
+    if (_trans_id < 0){
+        cout << "Oh somebody failed and I am updated replica of myself for ";
+        printAddress(&to_addr);
+        return;
+    }
+    Message *msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString() + msg->delimiter);
 
     if (success_status)
@@ -597,12 +722,12 @@ void MP2Node::processUpdate(Message incoming_msg) {
 void MP2Node::processDelete(Message incoming_msg) {
     bool success_status = deletekey(incoming_msg.key);
     int _trans_id = incoming_msg.transID;
-    cout << "I am in del " << endl;
-
-    Message *msg;
-    msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
-    msg->delimiter = "::";
     Address to_addr(incoming_msg.fromAddr);
+
+    if (_trans_id < 0)
+        return;
+
+    Message *msg = new Message(_trans_id, getMemberNode()->addr, REPLY, success_status);
     emulNet->ENsend(&getMemberNode()->addr, &to_addr, msg->toString() + msg->delimiter);
 
     if (success_status)
@@ -643,14 +768,15 @@ void MP2Node::processNodesReply(Message incoming_msg) {
 bool MP2Node::isRingSame(vector<Node> sortedMemList) {
     bool stablization_required = false;
 
-    if (!ring.empty()) {
+    if (!ring.empty() && !ht->isEmpty()) {
         if (ring.size() != sortedMemList.size())
             stablization_required = true;
         else
             for (int i = 0; i < sortedMemList.size(); i++) {
                 //std::string str1(sortedMemList.at(i).getAddress()->addr);
                 //std::string str2(ring.at(i).getAddress()->addr);
-                if (memcmp(sortedMemList[i].getAddress(), ring[i].getAddress(), sizeof(Address)) != 0){
+                //if (memcmp(sortedMemList[i].getAddress(), ring[i].getAddress(), sizeof(Address)) != 0){
+                if (!isNodeSame(sortedMemList[i], ring[i])){
                     //if (str1.compare(str2) == 0){
                     stablization_required = true;
                     break;
@@ -662,12 +788,21 @@ bool MP2Node::isRingSame(vector<Node> sortedMemList) {
 }
 
 void MP2Node::assignReplicationNodes() {
+    Node this_node = Node(getMemberNode()->addr);
     if (hasMyReplicas.empty() || haveReplicasOf.empty()) {
         for (int i = 0; i < ring.size(); i++) {
-            if (memcmp(ring[i].getAddress()->addr, &getMemberNode()->addr, sizeof(Address)) == 0) {
-
-                haveReplicasOf.push_back(Node(*ring[(i - 1) % ring.size()].getAddress()));
-                haveReplicasOf.push_back(Node(*ring[(i - 2) % ring.size()].getAddress()));
+            //if (memcmp(ring[i].getAddress()->addr, &getMemberNode()->addr, sizeof(Address)) == 0) {
+            if (isNodeSame(ring[i], this_node)){
+                if (i == 0){
+                    haveReplicasOf.push_back(Node(*ring[ring.size() - 1].getAddress()));
+                    haveReplicasOf.push_back(Node(*ring[ring.size() - 2].getAddress()));
+                } else if (i == 1){
+                    haveReplicasOf.push_back(Node(*ring[0].getAddress()));
+                    haveReplicasOf.push_back(Node(*ring[ring.size() - 1].getAddress()));
+                } else {
+                    haveReplicasOf.push_back(Node(*ring[(i - 1) % ring.size()].getAddress()));
+                    haveReplicasOf.push_back(Node(*ring[(i - 2) % ring.size()].getAddress()));
+                }
 
                 hasMyReplicas.push_back(Node(*ring[(i + 1) % ring.size()].getAddress()));
                 hasMyReplicas.push_back(Node(*ring[(i + 2) % ring.size()].getAddress()));
@@ -746,56 +881,4 @@ void MP2Node::incTransactionReplyCount(int _trans_id, int ack_type, string incom
         this->transaction_count[_trans_id].ackStore.push_back(pair<int, string>(ack_type, incoming_message));
         this->transaction_count[_trans_id].reply_count++;
     }
-}
-
-vector<Node> MP2Node::findMyBosses(string key){
-    size_t pos = hashFunction(key);
-    vector<Node> addr_vec;
-    if (ring.size() >= 3) {
-        // if pos <= min || pos > max, the leader is the min
-        if (pos <= ring.at(0).getHashCode() || pos > ring.at(ring.size()-1).getHashCode()) {
-            addr_vec.emplace_back(ring.at(ring.size() - 1));
-            addr_vec.emplace_back(ring.at(ring.size() - 2));
-        }
-        else if (pos > ring.at(0).getHashCode() && pos <= ring.at(1).getHashCode()) {
-            addr_vec.emplace_back(ring.at(0));
-            addr_vec.emplace_back(ring.at(ring.size() - 1));
-        }
-        else {
-            // go through the ring until pos <= node
-            for (int i=2; i<ring.size(); i++){
-                Node addr = ring.at(i);
-                if (pos <= addr.getHashCode()) {
-                    addr_vec.emplace_back(ring.at((i-1)%ring.size()));
-                    addr_vec.emplace_back(ring.at((i-2)%ring.size()));
-                    break;
-                }
-            }
-        }
-    }
-    return addr_vec;
-}
-
-vector<Node> MP2Node::findMyReplicas(string key){
-    size_t pos = hashFunction(key);
-    vector<Node> addr_vec;
-    if (ring.size() >= 3) {
-        // if pos <= min || pos > max, the leader is the min
-        if (pos <= ring.at(0).getHashCode() || pos > ring.at(ring.size()-1).getHashCode()) {
-            addr_vec.emplace_back(ring.at(1));
-            addr_vec.emplace_back(ring.at(2));
-        }
-        else {
-            // go through the ring until pos <= node
-            for (int i=1; i<ring.size(); i++){
-                Node addr = ring.at(i);
-                if (pos <= addr.getHashCode()) {
-                    addr_vec.emplace_back(ring.at((i+1)%ring.size()));
-                    addr_vec.emplace_back(ring.at((i+2)%ring.size()));
-                    break;
-                }
-            }
-        }
-    }
-    return addr_vec;
 }
