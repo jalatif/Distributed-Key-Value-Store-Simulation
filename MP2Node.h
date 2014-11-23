@@ -124,6 +124,7 @@ public:
     bool isNodeSame(Node n1, Node n2);
     int ifExistNode(vector<Node> v, Node n1);
 
+    // find keys where I am replica of given type
     vector<pair<string, string>> findMyKeys(ReplicaType rep_type);
 
 
