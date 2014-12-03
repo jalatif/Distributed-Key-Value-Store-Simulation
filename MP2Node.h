@@ -30,17 +30,17 @@
  * 				4) Client side CRUD APIs
  */
 
-#define RF 3
-#define Reply_Timeout 4
+#define RF 3 // Number of replicas
+#define Reply_Timeout 4 // Reply timeout
 
 typedef struct {
-    int reply_count;
-    MessageType rep_type;
-    int timestamp;
-    string key;
-    string value;
-    vector<pair<int, string>> ackStore;
-} transaction_details;
+    int reply_count; // reply count
+    MessageType rep_type; // message type
+    int timestamp; // timestamp of the message
+    string key; // key in the message
+    string value; // value if in the message
+    vector<pair<int, string>> ackStore; // data structure to store acks and nacks along with the values.
+} transaction_details; // data structure to store details of a given transaction.
 
 class MP2Node {
 private:
@@ -60,9 +60,15 @@ private:
 	EmulNet * emulNet;
 	// Object of Log
 	Log * log;
-    // transaction_counter
-    int transaction_id;
+
+    // transaction_counter id for sending messages from this node to get reply with same id
+    int transaction_id; // How can we use global transaction_id like g_transId because in real world that will require
+	// too much communication between servers and may be concurrency issues if there is a leader.
+	// So, I used a transaction_id per node which should also work in real world networks.
+
+
     // TransactionId with reply count
+	//// Store transaction details defined in struct per each transaction
     map<int, transaction_details> transaction_count;
 
 public:
@@ -112,23 +118,28 @@ public:
     // check if ring is same as before
     bool isRingSame(vector<Node> sortedMemList);
 
-    //
+    //Assign hasReplicas and haveReplicas from the information about new ring.
     void assignReplicationNodes();
 
-    //
+    // initialize the details of the given transaction to save it.
     void initTransactionCount(int _trans_id, string key, string value, MessageType msg_type);
+
+	// increment the transaction reply count and save value according to ack or nack.
     void incTransactionReplyCount(int _trans_id, int ack_type, string incoming_message);
+
+	//Count the number of acks and nacks for a given transaction.
     pair<int, int> countAcks(int _trans_id);
 
     //check if nodes are similar
     bool isNodeSame(Node n1, Node n2);
+	//check if a given node exist in vector of nodes.
     int ifExistNode(vector<Node> v, Node n1);
 
     // find keys where I am replica of given type
     vector<pair<string, string>> findMyKeys(ReplicaType rep_type);
 
 
-    //
+    // Handle for server create, read, delete, update, readreply and reply messages
     void processCreate(Message incoming_msg);
     void processRead(Message incoming_msg);
     void processDelete(Message incoming_msg);
@@ -136,6 +147,7 @@ public:
     void processReadReply(Message incoming_msg);
     void processNodesReply(Message incoming_msg);
 
+	// log functions at coordinator to log success or failure according to the type of message held by the iterator when message timeouts.
     void logCoordinatorSuccess(map<int, transaction_details>::iterator it);
     void logCoordinatorFailure(map<int, transaction_details>::iterator it);
 
